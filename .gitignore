@@ -10,3 +10,10 @@
 node_modules/
 npm-debug.log
 yarn-error.log
+
+# Build output directory
+dist/
+
+# Test coverage reports
+coverage/
+.nyc_output/

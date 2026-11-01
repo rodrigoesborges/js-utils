@@ -1,0 +1,28 @@
+name: "Bump version"
+
+on:
+  push:
+    branches:
+      - "master"
+
+jobs:
+  bump:
+    name: "Bump version on master"
+    runs-on: ubuntu-latest
+    if: "!startsWith(github.event.head_commit.message, 'chore: bump version to')"
+
+    steps:
+      - name: "Generate GitHub App token"
+        id: app-token
+        uses: "actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1"  # v3.2.0
+        with:
+          app-id: ${{ secrets.GH_APP_ID }}
+          private-key: ${{ secrets.GH_APP_PRIVATE_KEY }}
+      - name: "Checkout source code"
+        uses: "actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1"  # v7.0.1
+        with:
+          token: ${{ steps.app-token.outputs.token }}
+      - name: "Automated Release"
+        uses: "jitsi/gh-actions/npm-version-bump@6ea91f36593d6a041528b2bf5af1cf667888f48e"  # npm-version-bump/v1.0.1
+        env:
+          GITHUB_TOKEN: ${{ steps.app-token.outputs.token }}

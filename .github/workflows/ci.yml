@@ -1,16 +1,118 @@
-name: Simple CI
+name: CI
 
-on: [pull_request]
+on:
+  push:
+    branches: [master, main]
+  pull_request:
+
+# Dependabot-triggered runs get a read-only GITHUB_TOKEN unless permissions are
+# declared explicitly, which made the check-runs API call in the test job fail.
+permissions:
+  contents: read
 
 jobs:
-  run-ci:
+  lint:
+    name: Lint
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v5
+
+    - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1  # v6
+      with:
+        node-version: 24
+        cache: 'npm'
+
+    - name: Install dependencies
+      run: npm ci
+
+    - name: Run ESLint
+      run: npm run lint
+
+  test:
+    name: Test
+    runs-on: ubuntu-latest
+    # The "Create test results check" step posts to the check-runs API, which
+    # needs checks:write.
+    permissions:
+      contents: read
+      checks: write
+    steps:
+    - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v5
+
+    - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1  # v6
+      with:
+        node-version: 24
+        cache: 'npm'
+
+    - name: Install dependencies
+      run: npm ci
+
+    - name: Run tests with coverage
+      run: |
+        npm run test:coverage 2>&1 | tee test-output.log
+        echo "TEST_EXIT_CODE=${PIPESTATUS[0]}" >> $GITHUB_ENV
+
+    - name: Parse test results
+      if: always()
+      id: test-results
+      run: ./.github/workflows/scripts/parse-test-results.sh test-output.log
+
+    - name: Generate test summary
+      if: always()
+      run: |
+        PASSED="${{ steps.test-results.outputs.passed }}"
+        FAILED="${{ steps.test-results.outputs.failed }}"
+        TOTAL="${{ steps.test-results.outputs.total }}"
+
+        ./.github/workflows/scripts/generate-test-summary.sh "$PASSED" "$FAILED" "$TOTAL" "$TEST_EXIT_CODE"
+
+    - name: Create test results check
+      if: always() && github.event_name == 'pull_request'
+      # Fork PRs run with a read-only token that permissions can't elevate;
+      # this reporting step must not fail the job when check creation is
+      # rejected, since the results are also in the step summary.
+      continue-on-error: true
+      uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3  # v9.0.0
+      with:
+        script: |
+          const createTestCheck = require('./.github/workflows/scripts/create-test-check.js');
+          await createTestCheck({
+            github,
+            context,
+            passed: '${{ steps.test-results.outputs.passed }}',
+            failed: '${{ steps.test-results.outputs.failed }}',
+            total: '${{ steps.test-results.outputs.total }}'
+          });
+
+    - name: Upload coverage to Codecov
+      uses: codecov/codecov-action@303a32d7a59b442fa8d48b6a1cc6825c09c847a5  # v7.1.1
+      with:
+        token: ${{ secrets.CODECOV_TOKEN }}
+        directory: ./coverage
+        fail_ci_if_error: false
+        verbose: true
+
+    - name: Upload coverage report as artifact
+      if: always()
+      uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9  # v7.0.2
+      with:
+        name: coverage-report
+        path: coverage/
+        retention-days: 30
+
+  build:
     name: Build
     runs-on: ubuntu-latest
     steps:
-    - uses: actions/checkout@v3
-    - uses: actions/setup-node@v3
+    - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v5
+
+    - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1  # v6
       with:
-        node-version: 16
+        node-version: 24
         cache: 'npm'
-    - run: npm install
-    - run: npm run lint
+
+    - name: Install dependencies
+      run: npm ci
+
+    - name: Build TypeScript
+      run: npm run build
